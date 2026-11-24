@@ -6,7 +6,8 @@ import 'package:url_launcher/url_launcher.dart';
 class AboutPage extends ConsumerWidget {
   const AboutPage({super.key});
 
-  static const String _repoURL = "https://github.com/shahriaarrr/mashhad-metro";
+  static const String _repoURL =
+      "https://github.com/MashhadMetro/mashhad-metro";
 
   Future<void> _launchUrl(String url) async {
     final uri = Uri.parse(url);
