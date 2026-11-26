@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:mashhad_metro/models/station_model.dart';
+import 'package:mashhad_metro/providers/map_settings_provider.dart';
 import 'package:mashhad_metro/pages/station_details.dart';
 import 'package:mashhad_metro/providers/station_provider.dart';
 import 'package:mashhad_metro/widgets/station_status.dart';
@@ -147,6 +148,7 @@ class _MapPageState extends ConsumerState<MapPage> {
   @override
   Widget build(BuildContext context) {
     final stationsAsync = ref.watch(allStationsProvider);
+    final mapSettings = ref.watch(mapSettingsProvider);
 
     return Scaffold(
       backgroundColor: const Color(0xFF1A1A1A),
@@ -178,6 +180,13 @@ class _MapPageState extends ConsumerState<MapPage> {
           ],
         ),
         centerTitle: true,
+        actions: [
+          IconButton(
+            tooltip: 'تنظیمات نقشه',
+            icon: const Icon(Icons.layers_outlined, color: Colors.white),
+            onPressed: _showMapSettingsDialog,
+          ),
+        ],
       ),
       body: stationsAsync.when(
         data: (stations) {
@@ -208,11 +217,12 @@ class _MapPageState extends ConsumerState<MapPage> {
                   maxZoom: 18,
                 ),
                 children: [
-                  TileLayer(
-                    urlTemplate:
-                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'ir.shahriaarrr.mashhad_metro',
-                  ),
+                  if (mapSettings.loaded && mapSettings.tilesEnabled)
+                    TileLayer(
+                      key: ValueKey(mapSettings.tileUrl),
+                      urlTemplate: mapSettings.tileUrl,
+                      userAgentPackageName: 'ir.shahriaarrr.mashhad_metro',
+                    ),
                   MarkerLayer(markers: _buildStationMarkers(stations)),
 
                   if (_currentPosition != null)
@@ -248,13 +258,18 @@ class _MapPageState extends ConsumerState<MapPage> {
                       ],
                     ),
 
-                  RichAttributionWidget(
-                    alignment: AttributionAlignment.bottomLeft,
-                    popupInitialDisplayDuration: const Duration(seconds: 3),
-                    attributions: [
-                      TextSourceAttribution('© OpenStreetMap contributors'),
-                    ],
-                  ),
+                  if (mapSettings.loaded && mapSettings.tilesEnabled)
+                    RichAttributionWidget(
+                      alignment: AttributionAlignment.bottomLeft,
+                      popupInitialDisplayDuration: const Duration(seconds: 3),
+                      attributions: [
+                        TextSourceAttribution(
+                          mapSettings.isDefaultServer
+                              ? '© OpenStreetMap contributors'
+                              : '© OpenStreetMap contributors · ${mapSettings.tileHost}',
+                        ),
+                      ],
+                    ),
                 ],
               ),
 
@@ -291,6 +306,97 @@ class _MapPageState extends ConsumerState<MapPage> {
         ),
       ),
     );
+  }
+
+  Future<void> _showMapSettingsDialog() async {
+    final current = ref.read(mapSettingsProvider);
+    final urlController = TextEditingController(text: current.tileUrl);
+    var tilesEnabled = current.tilesEnabled;
+    String? urlError;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            title: const Text('تنظیمات نقشه'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('نمایش نقشه زمینه'),
+                    subtitle: const Text(
+                      'در صورت غیرفعال بودن، فقط ایستگاه‌ها نمایش داده می‌شوند و هیچ اتصال اینترنتی برقرار نمی‌شود.',
+                    ),
+                    value: tilesEnabled,
+                    onChanged: (value) =>
+                        setDialogState(() => tilesEnabled = value),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: urlController,
+                    enabled: tilesEnabled,
+                    textDirection: TextDirection.ltr,
+                    keyboardType: TextInputType.url,
+                    autocorrect: false,
+                    decoration: InputDecoration(
+                      labelText: 'آدرس سرور نقشه (Tile URL)',
+                      hintText: defaultTileUrl,
+                      helperText: 'باید شامل {z}، {x} و {y} باشد',
+                      errorText: urlError,
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  setDialogState(() {
+                    urlController.text = defaultTileUrl;
+                    tilesEnabled = true;
+                    urlError = null;
+                  });
+                },
+                child: const Text('پیش‌فرض'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('انصراف'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final url = urlController.text.trim();
+                  if (tilesEnabled && !MapSettings.isValidTileUrl(url)) {
+                    setDialogState(() => urlError = 'آدرس نامعتبر است');
+                    return;
+                  }
+                  ref
+                      .read(mapSettingsProvider.notifier)
+                      .update(
+                        MapSettings(
+                          tilesEnabled: tilesEnabled,
+                          tileUrl: MapSettings.isValidTileUrl(url)
+                              ? url
+                              : current.tileUrl,
+                        ),
+                      );
+                  Navigator.pop(dialogContext);
+                },
+                child: const Text('ذخیره'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    urlController.dispose();
   }
 
   List<Marker> _buildStationMarkers(List<StationModel> stations) {
